@@ -87,10 +87,16 @@ Vademecum/
 │   ├── dataset/                         # 4. Generación de Dataset para LLMs
 │   │   └── generate_finetune_dataset.py # Creador de pares de diálogo para entrenamiento
 │   │
-│   └── tools/                           # 5. Herramientas CLI y Evaluación
-│       └── check_interactions.py        # Motor de consulta y evaluación clínica
+│   ├── tools/                           # 5. Herramientas CLI y Evaluación
+│   │   └── check_interactions.py        # Motor de consulta y evaluación clínica
+│   │
+│   └── ui/                              # 6. Componentes del Visualizador Interactivo
+│       ├── __init__.py
+│       ├── graph_renderer.py            # Generador de subgrafos interactivos PyVis
+│       └── views.py                     # Vistas de combinaciones, entidades y mapa global
 │
-├── check_interactions.py                # Wrapper en raíz para ejecución directa
+├── app.py                               # 🚀 Aplicación Web Interactiva (Streamlit)
+├── check_interactions.py                # Wrapper en raíz para ejecución directa CLI
 ├── requirements.txt                     # Dependencias del entorno
 ├── .gitignore                           # Exclusiones de Git
 └── README.md                            # Documentación del proyecto
@@ -118,9 +124,24 @@ playwright install chromium
 
 ## 💡 Guía de Uso
 
-### 1. Consultar Interacciones entre Medicamentos (CLI)
+### 1. Visualizador Interactivo del Grafo (Web App)
 
-Puedes evaluar cualquier combinación de medicamentos comerciales utilizando el script en la raíz:
+Inicia la aplicación interactiva de visualización con física de fuerzas, zoom, tooltips clínicos y 3 modos de exploración:
+
+```bash
+streamlit run app.py
+```
+
+**Modos disponibles en la aplicación:**
+1. 💊 **Evaluador de Combinaciones:** Ingresa 2 o más medicamentos y visualiza el subgrafo con alertas automáticas (duplicidades en rojo, interacciones en naranja, laboratorios y principios activos).
+2. 🔍 **Explorador de Entidades (Ego-Graph):** Búsqueda de cualquier Medicamento, Sustancia o Laboratorio a 1 y 2 saltos con su ficha técnica completa al costado.
+3. 🌐 **Red Global de Interacciones:** Visualización del mapa denso de sustancias con filtros por conectividad mínima y tabla de interacciones.
+
+---
+
+### 2. Consultar Interacciones entre Medicamentos (CLI)
+
+Puedes evaluar cualquier combinación de medicamentos comerciales directamente por terminal:
 
 ```bash
 python3 check_interactions.py "3TC" "3-TC/AZT ELEA"
