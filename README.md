@@ -1,6 +1,6 @@
 # 💊 Vademecum: Grafo de Conocimiento Farmacológico & Dataset LLM
 
-Pipeline integral de extracción (Scraping), normalización (ETL), construcción de **Grafo de Conocimiento Farmacológico** (NetworkX + SQLite) y generación de **Datasets de Fine-Tuning** (ShareGPT/JSONL) para modelos de lenguaje especializados en farmacología clínica.
+Pipeline integral de extracción (Scraping), normalización (ETL), construcción de **Grafo de Conocimiento Farmacológico** (NetworkX + SQLite) enriquecido con taxonomía de clases terapéuticas y generación de **Datasets de Fine-Tuning** (ShareGPT/JSONL) para modelos de lenguaje especializados en farmacología clínica.
 
 ---
 
@@ -26,14 +26,14 @@ El proyecto implementa un enfoque híbrido **Determinístico + Probabilístico (
 │    Grafo de Conocimiento (NetworkX) │     │      Dataset de Instrucción         │
 │     & SQLite Indexado (Final/)      │     │            para LLMs                │
 │  • Nodos: 11.533                    │     │   (vademecum_finetune_train.jsonl)  │
-│  • Relaciones: 28.570               │     │  • 1.500 pares conversacionales     │
-│  • Interacciones directas: 4.583    │     │  • Formato ShareGPT / ChatML        │
+│  • Relaciones: 43.122               │     │  • 1.500 pares conversacionales     │
+│  • Interacciones directas: 19.087   │     │  • Formato ShareGPT / ChatML        │
 └──────────────────┬──────────────────┘     └──────────────────┬──────────────────┘
                    │                                           │
                    ▼                                           ▼
 ┌─────────────────────────────────────┐     ┌─────────────────────────────────────┐
 │ Verificador Determinístico          │     │  Modelo Fine-Tuned                  │
-│ (check_interactions.py)             │ ◄─► │  (Llama-3 / Qwen-2.5 / LoRA)        │
+│ (check_interactions.py / Web App)   │ ◄─► │  (Llama-3 / Qwen-2.5 / LoRA)        │
 │  • Duplicidades de principio activo │     │   Respuestas fundamentadas          │
 │  • Interacciones cruzadas directas  │     │   sin alucinaciones                 │
 │  • Contraindicaciones y alertas     │     │                                     │
@@ -49,7 +49,7 @@ Vademecum/
 ├── Final/                               # 🔒 Datasets Finales y Artefactos de Producción
 │   ├── todo.txt                         # Hoja de ruta y pasos futuros
 │   ├── vademecum_finetune_train.jsonl   # Dataset de Fine-Tuning (1.500 diálogos QA)
-│   ├── vademecum_graph.db               # Base SQLite indexada del Grafo
+│   ├── vademecum_graph.db               # Base SQLite indexada del Grafo (19.087 interacciones)
 │   ├── vademecum_graph.json             # Grafo de red exportado en JSON
 │   ├── vademecum_laboratorios.csv       # Catálogo maestro de laboratorios
 │   ├── vademecum_productos.csv          # Catálogo maestro de productos comerciales
@@ -82,7 +82,8 @@ Vademecum/
 │   │   └── migrar_a_sqlite.py           # Migración a base de datos relacional
 │   │
 │   ├── graph/                           # 3. Construcción del Grafo de Conocimiento
-│   │   └── build_vademecum_graph.py     # Generador de vademecum_graph.json y .db
+│   │   ├── build_vademecum_graph.py     # Generador de vademecum_graph.json y .db
+│   │   └── pharmacological_classes.py   # Taxonomía de 25+ familias farmacológicas y alias
 │   │
 │   ├── dataset/                         # 4. Generación de Dataset para LLMs
 │   │   └── generate_finetune_dataset.py # Creador de pares de diálogo para entrenamiento
@@ -99,6 +100,7 @@ Vademecum/
 ├── check_interactions.py                # Wrapper en raíz para ejecución directa CLI
 ├── requirements.txt                     # Dependencias del entorno
 ├── .gitignore                           # Exclusiones de Git
+├── BITACORA.md                          # 📜 Registro histórico y bitácora técnica de hitos
 └── README.md                            # Documentación del proyecto
 ```
 
@@ -131,11 +133,12 @@ Inicia la aplicación interactiva de visualización con física de fuerzas, zoom
 ```bash
 streamlit run app.py
 ```
+*(O con tu entorno virtual: `/home/augusto/envs/tesis/bin/streamlit run app.py`)*
 
 **Modos disponibles en la aplicación:**
 1. 💊 **Evaluador de Combinaciones:** Ingresa 2 o más medicamentos y visualiza el subgrafo con alertas automáticas (duplicidades en rojo, interacciones en naranja, laboratorios y principios activos).
 2. 🔍 **Explorador de Entidades (Ego-Graph):** Búsqueda de cualquier Medicamento, Sustancia o Laboratorio a 1 y 2 saltos con su ficha técnica completa al costado.
-3. 🌐 **Red Global de Interacciones:** Visualización del mapa denso de sustancias con filtros por conectividad mínima y tabla de interacciones.
+3. 🌐 **Red Global de Interacciones:** Visualización del mapa denso de sustancias con filtros por conectividad mínima y tabla interactiva de interacciones.
 
 ---
 
@@ -144,7 +147,7 @@ streamlit run app.py
 Puedes evaluar cualquier combinación de medicamentos comerciales directamente por terminal:
 
 ```bash
-python3 check_interactions.py "3TC" "3-TC/AZT ELEA"
+python3 check_interactions.py "Sintrom" "Ibupirac"
 ```
 
 **Ejemplo de salida:**
@@ -154,43 +157,37 @@ python3 check_interactions.py "3TC" "3-TC/AZT ELEA"
 =======================================================
 
 📋 MEDICAMENTOS ANALIZADOS:
-  • 3TC (Lab: GSK BIOPHARMA)
-    Principios Activos: Lamivudina
-  • 3-TC/AZT ELEA (Lab: ELEA)
-    Principios Activos: Lamivudina, Zidovudina
+  • SINTROM® (Lab: SIEGFRIED)
+    Principios Activos: Acenocumarol
+  • IBUPIRAC (Lab: PFIZER)
+    Principios Activos: Ibuprofeno
 
 -------------------------------------------------------
 1. RIESGO DE DUPLICACIÓN DE PRINCIPIOS ACTIVOS:
-  🚨 ALERTA DE SOBREDOSIS/DUPLICIDAD: El principio 'Lamivudina' está presente en múltiples medicamentos: 3TC, 3-TC/AZT ELEA
+  ✅ Sin duplicaciones de principios activos detectadas.
 
 -------------------------------------------------------
 2. INTERACCIONES FARMACOLÓGICAS DIRECTAS:
-  ✅ No se registraron interacciones cruzadas directas conocidas entre los principios activos.
+  ⚠️ INTERACCIÓN DETECTADA entre 'Acenocumarol' (SINTROM®) e 'Ibuprofeno' (IBUPIRAC):
+     Detalle: [Interacción de Clase: AINEs] Las siguientes drogas potencian el efecto anticoagulante...
 
 -------------------------------------------------------
 3. CONTRAINDICACIONES Y PRECAUCIONES POR SUSTANCIA:
-  💊 Principio: Lamivudina (en 3TC, 3-TC/AZT ELEA)
-     Acción Terapéutica: Antiviral.
-     Contraindicaciones: Hipersensibilidad a la lamivudina...
+  💊 Principio: Acenocumarol (en SINTROM®)
+     Acción Terapéutica: Anticoagulante oral cumarínico...
 ```
 
 ---
 
-### 2. Regenerar el Grafo de Conocimiento
+### 3. Regenerar el Grafo de Conocimiento y Dataset
 
-Si actualizas los datos en `Final/`, reconstruye el grafo y la base indexada:
+Si se actualizan las monografías o la taxonomía de clases:
 
 ```bash
+# 1. Reconstruir Grafo SQLite y JSON con las 19.087 interacciones
 python3 src/graph/build_vademecum_graph.py
-```
 
----
-
-### 3. Regenerar el Dataset de Fine-Tuning para LLMs
-
-Para generar un nuevo lote de entrenamiento en formato JSONL:
-
-```bash
+# 2. Regenerar Dataset de Fine-Tuning para LLMs
 python3 src/dataset/generate_finetune_dataset.py
 ```
 
@@ -198,17 +195,17 @@ python3 src/dataset/generate_finetune_dataset.py
 
 ## 📊 Entidades del Grafo (`vademecum_graph.db`)
 
-| Tabla / Entidad | Descripción |
-| :--- | :--- |
-| `productos` | Medicamentos comerciales con laboratorio, composición, indicaciones y presentación. |
-| `sustancias` | Principios activos, acción terapéutica, interacciones, contraindicaciones y precauciones. |
-| `laboratorios` | Información de contacto y catálogo de laboratorios farmacéuticos. |
-| `producto_sustancia` | Relación M:N entre medicamentos comerciales y sus principios activos. |
-| `producto_patologia` | Relación M:N entre medicamentos y patologías/indicaciones clínicas. |
-| `sustancia_interaccion` | Relaciones explícitas de interacción fármaco-fármaco con detalle clínico. |
+| Tabla / Entidad | Descripción | Registros |
+| :--- | :--- | :---: |
+| `productos` | Medicamentos comerciales con laboratorio, composición, indicaciones y presentación. | 8.349 |
+| `sustancias` | Principios activos, acción terapéutica, interacciones, contraindicaciones y precauciones. | 2.647 |
+| `laboratorios` | Información de contacto y catálogo de laboratorios farmacéuticos. | 296 |
+| `producto_sustancia` | Relación M:N entre medicamentos comerciales y sus principios activos. | 11.135 |
+| `producto_patologia` | Relación M:N entre medicamentos y patologías/indicaciones clínicas. | 12.900 |
+| `sustancia_interaccion` | Relaciones explícitas y propagadas de interacción fármaco-fármaco con detalle clínico. | **19.087** |
 
 ---
 
-## 🔒 Integridad de Datos
+## 📜 Bitácora Histórica de Desarrollo
 
-Todos los datos procesados y definitivos se encuentran versionados en la carpeta `Final/` y no deben ser modificados directamente por scripts intermedios de extracción.
+Para consultar el registro cronológico detallado de todos los hitos de ingeniería, scraping, reestructuración modular y enriquecimiento semántico del proyecto, consulta la [**BITACORA.md**](file:///home/augusto/Desktop/Vademecum/BITACORA.md).
