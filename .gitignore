@@ -1,0 +1,25 @@
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+
+# Playwright & Browser automation artifacts
+.playwright-mcp/
+.playwright/
+
+# Logs & temporary files
+logs/*.log
+*.log
+.DS_Store
+
+# IDE / Editor configuration
+.vscode/
+.idea/
+*.swp

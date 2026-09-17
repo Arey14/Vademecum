@@ -1,0 +1,69 @@
+
+  Se ha construido la solución acordada para alimentar tu LLM combinando un Grafo de Conocimiento (NetworkX + SQLite) como fuente determinística de verdad y un Dataset de 
+  Fine-Tuning (JSONL) para el entrenamiento del modelo.
+
+  He creado el documento completo de arquitectura e instrucciones en el artefacto vademecum_llm_architecture.md.
+  ──────
+  ### 🛠️ Resumen de lo generado en el proyecto:
+
+  1. Grafo de Conocimiento y BD Relacional (build_vademecum_graph.py):
+      • Extrajo 11.533 nodos (Productos, Laboratorios, Sustancias y Patologías) y 28.570 relaciones.
+      • Mapeó 4.583 relaciones explícitas de interacciones cruzadas entre principios activos.
+      • Exportó los datos a vademecum_graph.json y la base SQLite indexada vademecum_graph.db.
+  2. Evaluador de Interacciones / Contraindicaciones (check_interactions.py):
+      • Herramienta en Python para consultar combinaciones de medicamentos y detectar:
+	  • 🚨 Duplicidad de principios activos (riesgo de sobredosis accidental).
+	  • ⚠️ Interacciones medicamentosas directas entre componentes.
+	  • 📋 Contraindicaciones y precauciones clínicas.
+      • Ejemplo de uso:
+	/home/augusto/envs/tesis/bin/python /home/augusto/Desktop/Vademecum/check_interactions.py "3TC" "3-TC/AZT ELEA"
+
+  3. Dataset de Instrucción para Fine-Tuning (generate_finetune_dataset.py):
+      • Generó 1.500 pares de entrenamiento conversacionales en formato JSONL (vademecum_finetune_train.jsonl) estructurados para ShareGPT / Llama-3 / Qwen Chat, listos para
+usarse con
+      Unsloth / QLoRA / PEFT.
+
+
+────────────────────────────────────────────────────────────
+> Cuales serian los pasos a continuacion?
+
+  Los pasos a continuación para avanzar con tu proyecto/tesis se dividen en 4 fases clave:
+  ──────
+  ### 1. Entrenar el Modelo con Fine-Tuning (QLoRA)
+
+  Utilizar el dataset generado ( vademecum_finetune_train.jsonl ) para adaptar un modelo de lenguaje abierto.
+
+  • Modelo recomendado:  Llama-3.1-8B-Instruct  o  Qwen-2.5-7B-Instruct .
+  • Herramientas: Unsloth o Hugging Face PEFT / TRL (permite hacer fine-tuning muy rápido en 4-bit consumiendo < 10 GB de VRAM en GPU local o en Google Colab / Kaggle gratis).
+  • Resultado: Un adaptador LoRA especializado en terminología y evaluación médica/farmacológica.
+  ──────
+  ### 2. Integrar el Grafo con el LLM (Tool Calling / Agente Híbrido)
+
+  Conectar el verificador determinístico ( check_interactions.py  /  vademecum_graph.db ) con el LLM mediante Function Calling / Agent Tooling.
+
+  • Flujo de Ejecución:
+      1. El usuario pregunta en lenguaje natural: "Tomo 3TC y 4x4, ¿tengo algún riesgo?"
+      2. El LLM extrae los nombres de los medicamentos e invoca la herramienta del Grafo ( evaluate_combination(["3TC", "4 X 4"]) ).
+      3. El Grafo devuelve la evidencia exacta (principios activos, duplicaciones, interacciones).
+      4. El LLM fine-tuneado toma esa evidencia factual y genera la respuesta final clara y fundamentada sin alucinaciones.
+
+  ──────
+  ### 3. Evaluación y Validación (Benchmarking)
+
+  Medir la calidad del sistema antes y después del enfoque híbrido:
+
+  • Pruebas de Caso: Diseñar un set de 50 a 100 escenarios de prueba (combinaciones de 2, 3 o más medicamentos).
+  • Métricas:
+      • Precisión factual: % de interacciones reales detectadas vs ignoradas.
+      • Tasa de alucinación: Verificar que el LLM no invente contraindicaciones que no existan en el Grafo.
+
+  ──────
+  ### 4. Construir una Demo Interactiva (Streamlit / Gradio)
+
+  Crear una interfaz gráfica simple y atractiva para presentar los resultados de la tesis:
+
+  • Permite ingresar una lista de medicamentos o síntomas.
+  • Muestra de un lado el Grafo de Interacciones visualmente y del otro la Explicación del LLM.
+  ──────
+  👉 ¿Con cuál de estos pasos te gustaría continuar? Podríamos escribir el script de entrenamiento para Unsloth/Colab (Paso 1) o armar el Agente / Demo en Streamlit (Pasos
+  2/4).
