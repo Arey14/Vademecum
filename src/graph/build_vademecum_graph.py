@@ -4,8 +4,14 @@ import json
 import sqlite3
 import re
 import os
+import sys
 from pathlib import Path
 import networkx as nx
+
+# Add project root to sys.path
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 try:
     from src.config import (
@@ -22,12 +28,14 @@ try:
     OUTPUT_GRAPH_JSON = str(GRAPH_JSON_PATH)
     OUTPUT_SQLITE_DB = str(GRAPH_DB_PATH)
 except ImportError:
-    BASE_DIR = Path(__file__).resolve().parent.parent.parent / "Final"
+    BASE_DIR = PROJECT_ROOT / "Final"
     PRODUCTOS_CSV = str(BASE_DIR / 'vademecum_productos.csv')
     LABORATORIOS_CSV = str(BASE_DIR / 'vademecum_laboratorios.csv')
     SUSTANCIAS_CSV = str(BASE_DIR / 'vademecum_sustancias.csv')
     OUTPUT_GRAPH_JSON = str(BASE_DIR / 'vademecum_graph.json')
     OUTPUT_SQLITE_DB = str(BASE_DIR / 'vademecum_graph.db')
+
+from src.graph.pharmacological_classes import SUBSTANCE_ALIASES, PHARMACOLOGICAL_CLASSES
 
 def clean_str(val):
     return val.strip() if val else ""
@@ -71,9 +79,26 @@ def build_graph_and_db():
     for lab_name, data in laboratorios.items():
         G.add_node(f"Lab:{lab_name}", type="Laboratorio", name=lab_name, **data)
         
-    # Add Sustancia Nodes
+    # Canonical substance name lookup (lowercase -> original)
     sustancia_names_lower = {name.lower(): name for name in sustancias.keys() if len(name) > 3}
     
+    # Auto-generate inverted aliases for acids: e.g. "Acetilsalicílico ácido" -> "ácido acetilsalicílico", "acido acetilsalicilico"
+    for name in list(sustancias.keys()):
+        parts = name.split()
+        if len(parts) >= 2 and parts[-1].lower() in ('ácido', 'acido'):
+            base = " ".join(parts[:-1])
+            sustancia_names_lower[f"ácido {base.lower()}"] = name
+            sustancia_names_lower[f"acido {base.lower()}"] = name
+            sustancia_names_lower[base.lower()] = name
+            
+    # Register aliases in lookup
+    for alias, canonical in SUBSTANCE_ALIASES.items():
+        if canonical.lower() in sustancia_names_lower:
+            sustancia_names_lower[alias.lower()] = sustancia_names_lower[canonical.lower()]
+        elif canonical in sustancias:
+            sustancia_names_lower[alias.lower()] = canonical
+            
+    # Add Sustancia Nodes
     for sust_name, data in sustancias.items():
         G.add_node(f"Sust:{sust_name}", type="Sustancia", name=sust_name, **data)
         
@@ -95,8 +120,9 @@ def build_graph_and_db():
         principios = split_items(prod.get('principios_activos'))
         for p in principios:
             target_sust = p
-            if p.lower() in sustancia_names_lower:
-                target_sust = sustancia_names_lower[p.lower()]
+            p_lower = p.lower()
+            if p_lower in sustancia_names_lower:
+                target_sust = sustancia_names_lower[p_lower]
                 
             sust_node = f"Sust:{target_sust}"
             if sust_node not in G:
@@ -111,44 +137,106 @@ def build_graph_and_db():
                 G.add_node(pat_node, type="Patologia", name=pat)
             G.add_edge(prod_id, pat_node, relation="INDICADO_PARA")
 
-    print("Extracting Substance Interactions & Contraindications...")
+    print("\n--- Starting Enhanced Interaction Extraction ---")
     
-    # Compile single regex for ultra-fast matching of substance names
-    sorted_substances = sorted(list(sustancia_names_lower.keys()), key=len, reverse=True)
-    pattern_str = r'\b(' + '|'.join(map(re.escape, sorted_substances)) + r')\b'
+    # 1. Compile regex for Direct Substance Matching
+    sorted_terms = sorted(list(sustancia_names_lower.keys()), key=len, reverse=True)
+    pattern_str = r'\b(' + '|'.join(map(re.escape, sorted_terms)) + r')\b'
     sust_regex = re.compile(pattern_str, re.IGNORECASE)
     
-    interaction_count = 0
-    contraindication_count = 0
+    # 2. Compile Class / Family Matchers and resolve Member Sets
+    compiled_classes = []
+    for class_name, cdata in PHARMACOLOGICAL_CLASSES.items():
+        mention_rx = re.compile('|'.join(cdata['mention_patterns']), re.IGNORECASE)
+        action_rx = re.compile('|'.join(cdata['action_patterns']), re.IGNORECASE) if cdata.get('action_patterns') else None
+        
+        # Resolve members
+        resolved_members = set()
+        for cm in cdata['core_members']:
+            if cm.lower() in sustancia_names_lower:
+                resolved_members.add(sustancia_names_lower[cm.lower()])
+                
+        # Auto-classify based on action_therapeutica
+        if action_rx:
+            for s_name, s_data in sustancias.items():
+                acc = s_data.get('accion_therapeutica', '')
+                if acc and action_rx.search(acc):
+                    resolved_members.add(s_name)
+                    
+        compiled_classes.append({
+            'name': class_name,
+            'mention_rx': mention_rx,
+            'members': list(resolved_members)
+        })
+        print(f"Class [{class_name}]: {len(resolved_members)} members mapped.")
+        
+    direct_interaction_count = 0
+    class_interaction_count = 0
+    contraindication_interaction_count = 0
     
+    # Extraction loop over all substances
     for sust_name, data in sustancias.items():
         sust_node = f"Sust:{sust_name}"
-        inter_text = data.get('interacciones', '')
-        contra_text = data.get('contraindicaciones', '')
+        inter_text = data.get('interacciones', '') or ''
+        contra_text = data.get('contraindicaciones', '') or ''
+        prec_text = data.get('precauciones', '') or ''
         
+        # A. Direct matches in 'interacciones'
         if inter_text:
             matches = sust_regex.findall(inter_text)
             for m in set(matches):
                 other_orig = sustancia_names_lower.get(m.lower())
                 if other_orig and other_orig != sust_name:
                     other_node = f"Sust:{other_orig}"
-                    G.add_edge(sust_node, other_node, relation="INTERACTUA_CON", detail=inter_text[:300])
-                    interaction_count += 1
+                    if not G.has_edge(sust_node, other_node):
+                        G.add_edge(sust_node, other_node, relation="INTERACTUA_CON", detail=inter_text[:300])
+                        direct_interaction_count += 1
                         
-        if contra_text:
-            G.nodes[sust_node]['contraindicaciones_text'] = contra_text
-            contraindication_count += 1
+        # B. Direct matches in 'contraindicaciones' and 'precauciones' (Clinical Contraindications)
+        combined_warnings = f"{contra_text} {prec_text}".strip()
+        if combined_warnings:
+            # Check for direct co-administration warnings
+            if re.search(r'\b(concomitante|coadministra|combinaci[oó]n|administraci[oó]n\s+conjunta|asociaci[oó]n\s+con)\b', combined_warnings, re.IGNORECASE):
+                matches = sust_regex.findall(combined_warnings)
+                for m in set(matches):
+                    other_orig = sustancia_names_lower.get(m.lower())
+                    if other_orig and other_orig != sust_name:
+                        other_node = f"Sust:{other_orig}"
+                        if not G.has_edge(sust_node, other_node):
+                            detail_txt = f"[Contraindicación Clínica / Precaución] {combined_warnings[:300]}"
+                            G.add_edge(sust_node, other_node, relation="INTERACTUA_CON", detail=detail_txt)
+                            contraindication_interaction_count += 1
+                            
+        # C. Class / Family Propagation (AINEs, Anticoagulantes, etc.)
+        all_clinical_text = f"{inter_text} {contra_text}".strip()
+        if all_clinical_text:
+            for cls in compiled_classes:
+                if cls['mention_rx'].search(all_clinical_text):
+                    for member in cls['members']:
+                        if member != sust_name:
+                            member_node = f"Sust:{member}"
+                            if not G.has_edge(sust_node, member_node):
+                                detail_txt = f"[Interacción de Clase: {cls['name']}] {all_clinical_text[:280]}"
+                                G.add_edge(sust_node, member_node, relation="INTERACTUA_CON", detail=detail_txt)
+                                class_interaction_count += 1
 
-    print(f"Graph constructed: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges.")
-    print(f"Extracted {interaction_count} explicit substance-substance interaction edges.")
+    total_interactions = direct_interaction_count + contraindication_interaction_count + class_interaction_count
+    print(f"\nExtracted Interacciones Summary:")
+    print(f"  • Directas (Nombre explícito): {direct_interaction_count}")
+    print(f"  • Contraindicaciones / Precauciones: {contraindication_interaction_count}")
+    print(f"  • Propagadas por Clase / Familia: {class_interaction_count}")
+    print(f"  => TOTAL DE ARISTAS DE INTERACCIÓN: {total_interactions:,}")
+    print(f"Graph total nodes: {G.number_of_nodes():,}, total edges: {G.number_of_edges():,}")
 
     # Save Graph as JSON
+    print("\nSaving Graph JSON...")
     graph_data = nx.node_link_data(G)
     with open(OUTPUT_GRAPH_JSON, 'w', encoding='utf-8') as f:
         json.dump(graph_data, f, ensure_ascii=False, indent=2)
     print(f"Saved Knowledge Graph JSON to {OUTPUT_GRAPH_JSON}")
 
     # Build SQLite Relational Representation
+    print("Building SQLite Database...")
     if os.path.exists(OUTPUT_SQLITE_DB):
         os.remove(OUTPUT_SQLITE_DB)
         
@@ -238,14 +326,16 @@ def build_graph_and_db():
         principios = split_items(prod.get('principios_activos'))
         for p in principios:
             target_sust = p
-            if p.lower() in sustancia_names_lower:
-                target_sust = sustancia_names_lower[p.lower()]
+            p_lower = p.lower()
+            if p_lower in sustancia_names_lower:
+                target_sust = sustancia_names_lower[p_lower]
             cur.execute('INSERT OR IGNORE INTO producto_sustancia VALUES (?, ?)', (prod_name, target_sust))
             
         patologias = split_items(prod.get('patologias'))
         for pat in patologias:
             cur.execute('INSERT OR IGNORE INTO producto_patologia VALUES (?, ?)', (prod_name, pat))
 
+    # Insert Interacciones
     for u, v, kdata in G.edges(data=True):
         if kdata.get('relation') == 'INTERACTUA_CON':
             s1 = u.replace('Sust:', '')
@@ -253,11 +343,12 @@ def build_graph_and_db():
             detail = kdata.get('detail', '')
             cur.execute('INSERT OR IGNORE INTO sustancia_interaccion VALUES (?, ?, ?)', (s1, s2, detail))
 
-    # Add indexes for speed
+    # Add indexes for ultra-fast query execution
     cur.execute('CREATE INDEX idx_prod_name ON productos(nombre_producto)')
     cur.execute('CREATE INDEX idx_sust_name ON sustancias(nombre)')
     cur.execute('CREATE INDEX idx_prod_sust ON producto_sustancia(producto_name)')
-    cur.execute('CREATE INDEX idx_sust_inter ON sustancia_interaccion(sustancia_origen)')
+    cur.execute('CREATE INDEX idx_sust_inter_orig ON sustancia_interaccion(sustancia_origen)')
+    cur.execute('CREATE INDEX idx_sust_inter_dest ON sustancia_interaccion(sustancia_destino)')
 
     conn.commit()
     conn.close()

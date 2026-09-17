@@ -3,16 +3,21 @@ import json
 import sqlite3
 import random
 import os
+import sys
 from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 try:
     from src.config import FINETUNE_JSONL_PATH, GRAPH_DB_PATH
     from src.tools.check_interactions import evaluate_combination, get_connection
     DEFAULT_OUTPUT_JSONL = str(FINETUNE_JSONL_PATH)
 except ImportError:
-    BASE_DIR = Path(__file__).resolve().parent.parent.parent / "Final"
+    BASE_DIR = PROJECT_ROOT / "Final"
     DEFAULT_OUTPUT_JSONL = str(BASE_DIR / "vademecum_finetune_train.jsonl")
-    from ..tools.check_interactions import evaluate_combination, get_connection
+    from src.tools.check_interactions import evaluate_combination, get_connection
 
 OUTPUT_JSONL = os.environ.get("VADEMECUM_FINETUNE_JSONL", DEFAULT_OUTPUT_JSONL)
 SYSTEM_PROMPT = "Eres un asistente farmacológico experto especializado en evaluar interacciones medicamentosas, duplicación de principios activos, contraindicaciones y precauciones clínicas en medicamentos."
