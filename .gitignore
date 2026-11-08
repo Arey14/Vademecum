@@ -23,3 +23,12 @@ logs/*.log
 .vscode/
 .idea/
 *.swp
+
+# Base de tratamiento local (estado mutable)
+data/treatment.db
+.pytest_cache/
+
+# Material de cátedra (solo para uso local; NO se sube al repo)
+*.docx
+*.pptx
+~$*
