@@ -25,8 +25,8 @@ El proyecto implementa un enfoque híbrido **Determinístico + Probabilístico (
 ┌─────────────────────────────────────┐     ┌─────────────────────────────────────┐
 │    Grafo de Conocimiento (NetworkX) │     │      Dataset de Instrucción         │
 │     & SQLite Indexado (Final/)      │     │            para LLMs                │
-│  • Nodos: 11.533                    │     │   (vademecum_finetune_train.jsonl)  │
-│  • Relaciones: 43.122               │     │  • 1.500 pares conversacionales     │
+│  • Nodos: 11.555                    │     │   (vademecum_finetune_train.jsonl)  │
+│  • Relaciones: 43.178               │     │  • 1.500 pares conversacionales     │
 │  • Interacciones directas: 19.087   │     │  • Formato ShareGPT / ChatML        │
 └──────────────────┬──────────────────┘     └──────────────────┬──────────────────┘
                    │                                           │
@@ -150,6 +150,8 @@ Puedes evaluar cualquier combinación de medicamentos comerciales directamente p
 python3 check_interactions.py "Sintrom" "Ibupirac"
 ```
 
+Se puede escribir una marca, un principio activo (`Ibuprofeno`) o un código (`pv-3989`). Si el nombre es ambiguo (ej. `ibu`, que coincide con 77 productos) o parece un error de tipeo, el verificador **no adivina**: lista los candidatos con su código para que elijas y repitas la consulta.
+
 **Ejemplo de salida:**
 ```text
 =======================================================
@@ -197,11 +199,11 @@ python3 src/dataset/generate_finetune_dataset.py
 
 | Tabla / Entidad | Descripción | Registros |
 | :--- | :--- | :---: |
-| `productos` | Medicamentos comerciales con laboratorio, composición, indicaciones y presentación. | 8.349 |
+| `productos` | Medicamentos comerciales con `producto_ref` único (`pv-<id>`), laboratorio, composición, indicaciones y presentación. | 8.349 |
 | `sustancias` | Principios activos, acción terapéutica, interacciones, contraindicaciones y precauciones. | 2.647 |
 | `laboratorios` | Información de contacto y catálogo de laboratorios farmacéuticos. | 296 |
-| `producto_sustancia` | Relación M:N entre medicamentos comerciales y sus principios activos. | 11.135 |
-| `producto_patologia` | Relación M:N entre medicamentos y patologías/indicaciones clínicas. | 12.900 |
+| `producto_sustancia` | Relación M:N entre medicamentos (por `producto_ref`) y sus principios activos. | 12.112 |
+| `producto_patologia` | Relación M:N entre medicamentos (por `producto_ref`) y patologías/indicaciones clínicas. | 11.973 |
 | `sustancia_interaccion` | Relaciones explícitas y propagadas de interacción fármaco-fármaco con detalle clínico. | **19.087** |
 
 ---
