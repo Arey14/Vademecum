@@ -1,0 +1,32 @@
+# Changelog
+
+Registro de cambios del repositorio. Cada entrada indica **qué** cambió, **por qué** (referenciando el hallazgo `H-xx` de [docs/HALLAZGOS.md](docs/HALLAZGOS.md) o la decisión correspondiente) y **quién** lo hizo.
+Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Las entradas nuevas van arriba, en "Sin publicar".
+
+## [Sin publicar]
+
+### Agregado
+- La consigna del TP pasa a `docs/`. `.gitignore` excluye `*.docx` y `*.pptx` (material de cátedra de uso local, no se sube al repo). — Germán Samartino, 08/11/2026
+- **H-05 resuelto: `src/tools/buscador.py`**, búsqueda de medicamentos con candidatos, puntaje y estados `resuelto` / `ambiguo` / `no_encontrado` (normalización de tildes y símbolos, alias, ácidos invertidos, búsqueda difusa con `rapidfuzz`, códigos `pv-…`). Distingue productos de sustancias y no resuelve typos ni coincidencias parciales sin confirmar. ~15 ms por consulta; índice de 11.159 entradas. 48 tests nuevos (`tests/tools/`, 137 en total). Decisión D-18. — Germán Samartino, 08/11/2026
+- **`producto_ref` estable** (`pv-<id>`, derivado de la URL): `src/graph/producto_ref.py`, nueva columna `productos.producto_ref` (única) y claves `producto_ref` en `producto_sustancia` y `producto_patologia`; los nodos del grafo pasan a `Prod:<producto_ref>`. Se reconstruyó `Final/vademecum_graph.db` y `.json`: **las 19.087 interacciones no cambian**; nodos 11.533 → 11.555 y aristas 43.122 → 43.178 (los 22 nombres duplicados ya no se fusionan). Decisión D-17, avance de H-09. — Germán Samartino, 08/11/2026
+- `src/treatment/vademecum.py`: `crear_resolver()`, que resuelve un `producto_ref` a nombre y principios activos (base abierta en solo lectura). `tests/treatment/test_vademecum.py` con pruebas unitarias y de integración contra la base real. — Germán Samartino, 08/11/2026
+- Versionado con **cambio de marca si el principio activo es idéntico** (`versionar_medicacion(..., resolver=...)`). Decisión D-16. 89 tests en total. — Germán Samartino, 08/11/2026
+- `src/treatment/service.py`: `indicar_medicacion`, `agregar_medicacion_propia`, `versionar_medicacion`, `suspender_medicacion`, `registrar_toma` y `mantenimiento` (finaliza vencidas y extiende cronogramas crónicos). Operaciones atómicas, con permisos por rol y el vademécum inyectado como `resolver`. 20 tests nuevos en `tests/treatment/test_service.py` (65 en total). Decisión D-15. — Germán Samartino, 08/11/2026
+- `src/treatment/`: módulo de seguimiento del tratamiento. `models.py` (SQLModel: Usuario, Vinculo, Consulta, Prescripcion, TomaProgramada, EventoPaciente, Alerta, Resumen, LlmRun), `schemas.py` (`PrescripcionInput`, contrato de entrada del médico), `schedule.py` (`generar_cronograma`, función pura), `adherence.py` (adherencia con ventana ±60 min, por franja y día), `permissions.py` (reglas por rol) y `db.py`. Decisiones D-09 a D-13. — Germán Samartino, 07/11/2026
+- `tests/treatment/`: 45 tests (cronograma, adherencia, schemas, persistencia y permisos); `pytest.ini`. — Germán Samartino, 07/11/2026
+- `docs/MODELO_DATOS.md`: diseño del modelo de datos, reglas de permisos, definición de adherencia y pendientes. — Germán Samartino, 07/11/2026
+- `docs/PLAN.md` (borrador v1): objetivo médico ↔ paciente, roles, MoSCoW, qué hace y qué no el LLM, hipótesis, generador de pacientes sintéticos, etiquetado (nosotros y médico), arquitectura, workstreams, cronograma y decisiones D-01 a D-08. — Germán Samartino, 07/11/2026
+- `docs/HALLAZGOS.md`: revisión inicial del repo contra la consigna y los comentarios docentes, con 12 hallazgos (H-01 a H-12) con evidencia y propuesta. — Germán Samartino, 07/11/2026
+- `CHANGELOG.md`: este registro de cambios. — Germán Samartino, 07/11/2026
+
+### Cambiado
+- `evaluate_combination` usa el buscador: si hay ambigüedad devuelve `status: ambiguous` con los candidatos y **no hace análisis parcial**; acepta principios activos y códigos `pv-…` directamente; avisa (`avisos`) cuando sigue por un empate de igual composición. `find_product` pasa a ser exacto (ya no devuelve `AMOXICILINA SANT GALL FRIBURG` para `ibu`). El informe del CLI y la vista de combinaciones de la UI muestran las ambigüedades. `requirements.txt`: `rapidfuzz==3.14.6`. README: nota sobre las ambigüedades. — Germán Samartino, 08/11/2026
+- `src/tools/check_interactions.py`: `find_product` acepta un `producto_ref` (ej. `pv-3989`) además del nombre, devuelve `producto_ref` y busca los principios activos por ref (antes por nombre, lo que mezclaba productos con nombre repetido). La búsqueda por nombre sigue con la heurística original (H-05, pendiente). `src/ui/views.py` y `src/dataset/generate_finetune_dataset.py` se adaptan a las claves nuevas (la UI se verificó con el modo de test de Streamlit en sus tres vistas). — Germán Samartino, 08/11/2026
+- README: cifras del grafo actualizadas (nodos, relaciones, `producto_sustancia`, `producto_patologia`). — Germán Samartino, 08/11/2026
+- Corrección **H-13**: `check_interactions.py` ya no falla en consolas de Windows (`stdout` en UTF-8). — Germán Samartino, 08/11/2026
+- Se renombra `Prescripcion` → `Medicacion` (y `EstadoPrescripcion`, `PrescripcionInput`, `prescripcion_id`, funciones de permisos) para que `origen=paciente` no se lea como "el paciente prescribe". Decisión D-14. Se agrega `Medicacion.fin` (instante exacto de fin) y el parámetro `fin` de `generar_cronograma`. `docs/MODELO_DATOS.md` se actualiza (nomenclatura, versionado y tabla de permisos). — Germán Samartino, 08/11/2026
+- `requirements.txt`: se agregan sqlmodel, pydantic, tzdata y pytest con versiones fijadas (el resto sigue sin fijar: H-10). `src/config.py`: `TREATMENT_DB_PATH`. `.gitignore`: `data/treatment.db`. — Germán Samartino, 07/11/2026
+- `docs/HALLAZGOS.md`: H-11 pasa a "Fuera de alcance" por la decisión D-05 (fine-tuning → tools + RAG). — Germán Samartino, 07/11/2026
+
+## [0.1.0] — 17/09/2026 (estado heredado)
+Trabajo inicial de Augusto Rey: scraping de ar.prvademecum.com, ETL, grafo de conocimiento (NetworkX + SQLite), checker de interacciones por CLI, visualizador en Streamlit + PyVis y dataset de fine-tuning. Ver `BITACORA.md`.
