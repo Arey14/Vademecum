@@ -21,6 +21,9 @@ FINAL_PRODUCTOS_CSV = FINAL_DIR / "vademecum_productos.csv"
 FINAL_LABORATORIOS_CSV = FINAL_DIR / "vademecum_laboratorios.csv"
 FINAL_SUSTANCIAS_CSV = FINAL_DIR / "vademecum_sustancias.csv"
 
+# Base de datos de seguimiento del tratamiento (estado mutable, no se versiona)
+TREATMENT_DB_PATH = DATA_DIR / "treatment.db"
+
 # Intermediate Datasets
 INTERMEDIATE_PRODUCTOS_COMPLETE_CSV = DATA_INTERMEDIATE_DIR / "vademecum_productos_complete.csv"
 INTERMEDIATE_LABORATORIOS_CSV = DATA_INTERMEDIATE_DIR / "vademecum_laboratorios.csv"
