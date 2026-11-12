@@ -87,15 +87,24 @@ Reglas del versionado:
 - Si cambia el tipo de pauta (ej. de horarios fijos a cada 8 h), los campos de la pauta anterior no se arrastran.
 - El vademécum se inyecta como `resolver(producto_ref) -> ProductoResuelto` (nombre y principios activos), así el servicio no depende todavía del grafo.
 
-## 6. Cómo consume los datos el LLM *(todavía no implementado)*
+## 6. Cómo consume los datos el LLM
+
+Implementado en [`snapshots.py`](../src/treatment/snapshots.py). Son funciones de **solo lectura**, determinísticas y con permisos (lee el propio paciente o un médico vinculado). Devuelven diccionarios JSON-serializables con fechas en la zona horaria del paciente.
 
 | Función (tool) | Devuelve | Para qué |
 |---|---|---|
-| `estado_paciente(id)` | JSON de ~300 tokens: medicación vigente con principios activos, próximas tomas, adherencia de 7 días, alertas abiertas, próxima consulta | Contexto del chat del paciente |
-| `digest_periodo(id, desde, hasta)` | Estadísticas calculadas por código: adherencia por medicamento y franja, omitidas, eventos, alertas | Insumo del resumen previo para el médico |
-| `diff_medicacion(consulta_a, consulta_b)` | Qué se agregó, quitó o cambió | Insumo del resumen posterior para el paciente |
+| `estado_paciente(id)` | Medicación vigente con principios activos y pauta, próximas tomas, tomas sin registrar de las últimas 24 h, adherencia de 7 días (global y por producto), alertas abiertas, próxima consulta | Contexto del chat del paciente |
+| `digest_periodo(id, desde, hasta)` | Adherencia global, por franja, por día y por producto; peor franja y peor día (con mínimo de 3 tomas); tomas omitidas (marcadas o sin registrar) y fuera de ventana; eventos; alertas; cambios de medicación | Insumo del resumen previo para el médico |
+| `diff_medicacion(consulta_a, consulta_b)` | Qué se agregó, modificó (campo por campo, antes/después, `cambio_de_marca`), suspendió o finalizó | Insumo del resumen posterior para el paciente |
+| `cambios_medicacion(id, desde, hasta)` | Lo mismo para un intervalo cualquiera (es lo que usan las dos anteriores) | Idem |
 
-El LLM **solo redacta** sobre estos resultados; no cuenta ni calcula. `Resumen.hechos_fuente` guarda los ids de los hechos usados (`"toma:12"`, `"evento:3"`, `"alerta:7"`), lo que permite evaluar automáticamente si el resumen cubre los hechos relevantes y si inventa alguno.
+Decisiones de diseño:
+- **El LLM solo redacta**; no cuenta ni calcula. Los patrones (peor franja, peor día) también los detecta el código.
+- **Hechos con id** (`med:12`, `toma:7`, `evento:3`, `alerta:5`). `digest_periodo` y `cambios_medicacion` devuelven `hechos_fuente`, que se guarda en `Resumen.hechos_fuente`: permite evaluar automáticamente si un resumen cubre los hechos relevantes y si inventa alguno.
+- **Listas acotadas** (`MAX_LISTA = 20`): si se recorta, el digest informa cuántos ítems quedaron fuera, y los conteos siguen siendo exactos.
+- **El `texto` de los eventos lo escribió el paciente**: el prompt debe tratarlo como dato, nunca como instrucciones.
+- **Los cambios se detectan por `inicio` y `vigente_hasta`** de cada versión (no hay fecha de creación). `diff_medicacion` extiende un día el borde de la segunda consulta, porque lo indicado en una consulta suele empezar ese mismo día.
+- Lo que todavía no vencido no cuenta en la adherencia (misma regla D-10); las tomas pendientes de las últimas 24 h aparecen aparte como "sin registrar", para que el chat pueda preguntar por ellas.
 
 ## 7. Contratos de entrada
 
@@ -111,7 +120,7 @@ El LLM **solo redacta** sobre estos resultados; no cuenta ni calcula. `Resumen.h
 
 - [x] ~~Búsqueda por nombre/marca con candidatos y puntaje~~ → [`buscador.py`](../src/tools/buscador.py) (H-05, D-18). El formulario del médico (autocompletado) y el agente llaman a `buscar_medicamento` y trabajan con el `producto_ref` elegido.
 
-- [ ] Funciones de snapshot (§6).
+- [x] ~~Funciones de snapshot (§6)~~ → [`snapshots.py`](../src/treatment/snapshots.py).
 - [ ] Generador de pacientes sintéticos y base `gt_*` con la verdad.
 - [ ] Control del máximo diario de las tomas a demanda (más arriba) y su registro como evento.
 - [ ] Exportación a .ics a partir de las tomas.
