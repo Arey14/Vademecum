@@ -59,3 +59,12 @@ def verificar_registrar_toma(actor: Usuario, paciente_id: int) -> None:
     """Tildar una toma: solo el propio paciente (cualquier origen de la medicación)."""
     if actor.rol != Rol.PACIENTE or actor.id != paciente_id:
         raise PermisoDenegado("Solo el paciente puede registrar sus tomas.")
+
+
+def verificar_ver_paciente(session: Session, actor: Usuario, paciente_id: int) -> None:
+    """Lectura de los datos de un paciente: el propio paciente o un médico vinculado."""
+    if actor.rol == Rol.PACIENTE and actor.id == paciente_id:
+        return
+    if actor.rol == Rol.MEDICO and medico_vinculado(session, actor.id, paciente_id):
+        return
+    raise PermisoDenegado("No tenés permiso para ver los datos de este paciente.")
