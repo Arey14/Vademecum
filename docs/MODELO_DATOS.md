@@ -121,6 +121,33 @@ Decisiones de diseño:
 - [x] ~~Búsqueda por nombre/marca con candidatos y puntaje~~ → [`buscador.py`](../src/tools/buscador.py) (H-05, D-18). El formulario del médico (autocompletado) y el agente llaman a `buscar_medicamento` y trabajan con el `producto_ref` elegido.
 
 - [x] ~~Funciones de snapshot (§6)~~ → [`snapshots.py`](../src/treatment/snapshots.py).
-- [ ] Generador de pacientes sintéticos y base `gt_*` con la verdad.
+- [x] ~~Generador de pacientes sintéticos y base `gt_*` con la verdad~~ → [`src/synthetic/`](../src/synthetic/) (v0, ver §10).
 - [ ] Control del máximo diario de las tomas a demanda (más arriba) y su registro como evento.
 - [ ] Exportación a .ics a partir de las tomas.
+
+## 10. Generador de pacientes sintéticos (v0)
+
+Código en [`src/synthetic/`](../src/synthetic/). Decisiones D-23 a D-25 en `PLAN.md`.
+
+| Módulo | Qué hace |
+|---|---|
+| `catalogo.py` | Lee el vademécum (solo lectura). Usa productos de **un** principio activo y una lista curada de patologías ambulatorias (8 crónicas, 6 agudas). |
+| `perfil.py` | Arma el perfil: edad, 1–3 patologías, esquema de 1 a 8 medicamentos (todos con 1 comprimido por toma) y problemas sembrados: interacción (p = 0,20) y duplicidad por compra de otra marca (p = 0,15). |
+| `conducta.py` | Decide qué hace el paciente con cada toma: tomada en hora, tomada tarde (61–180 min) u omitida (olvido o abandono), y si lo registra. Tres arquetipos (cumplidor, regular, olvidadizo); el olvido sube de noche y los fines de semana. |
+| `redactor.py` | Escribe el texto del paciente con plantillas rioplatenses, con typos y sin tildes (interfaz `Redactor`, listo para un redactor con LLM). |
+| `gt.py` | La verdad: `gt_paciente`, `gt_toma`, `gt_evento`, `gt_problema`. Base separada. |
+| `generador.py` | Orquesta todo usando el **servicio real** (`indicar_medicacion`, `registrar_toma`, …). Misma semilla ⇒ misma cohorte. |
+| `validacion.py` | Informe de validez y diversidad, y la brecha entre adherencia **verdadera** y **registrada**. |
+
+**Verdad vs. registro.** Para cada toma se guarda qué pasó (`resultado`) y qué quedó en el sistema (`registro`: tildada, marcada omitida o sin registrar). Se puede tomar y no tildar, o no tomar y no avisar; por eso la adherencia registrada es siempre ≤ la verdadera, y esa brecha es una métrica de la evaluación.
+
+**Qué ve el sistema.** Los eventos de texto libre se guardan con `tipo = otro`, sin `producto_ref` ni `extraccion`: eso lo tiene que inferir el extractor; la respuesta correcta está solo en `gt_evento`.
+
+**Límites conocidos (v0).**
+- Dosis fija (1 comprimido) y pautas de un catálogo corto: la plausibilidad clínica la revisa el médico (M2).
+- Un solo médico y una sola consulta por paciente; no se simulan cambios de esquema (versionado) durante el período.
+- "Interacción" significa *par que figura en la tabla del vademécum* (se excluyen los textos que dicen que no hay); no distingue severidad (H-07).
+- Las tomas de las últimas 3 h no se simulan (quedan pendientes y sin verdad).
+- Tasa de interacciones alta a propósito (para tener positivos); hay que balancearla al armar el benchmark.
+- Generar 50 pacientes tarda ~1,5 min (cada acción pasa por el servicio real).
+
