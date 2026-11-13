@@ -36,6 +36,7 @@ except ImportError:
     OUTPUT_SQLITE_DB = str(BASE_DIR / 'vademecum_graph.db')
 
 from src.graph.pharmacological_classes import SUBSTANCE_ALIASES, PHARMACOLOGICAL_CLASSES
+from src.graph.producto_ref import producto_ref_desde_url
 
 def clean_str(val):
     return val.strip() if val else ""
@@ -71,6 +72,15 @@ def build_graph_and_db():
         for r in csv.DictReader(f):
             productos.append(r)
             
+    # Identificador estable de producto (el nombre NO es único). Falla si hay duplicados.
+    refs_vistos = {}
+    for r in productos:
+        ref = producto_ref_desde_url(r.get('url'))
+        if ref in refs_vistos:
+            raise ValueError(f"producto_ref duplicado {ref}: {refs_vistos[ref]} y {r.get('url')}")
+        refs_vistos[ref] = r.get('url')
+        r['producto_ref'] = ref
+
     print(f"Loaded: {len(laboratorios)} laboratorios, {len(sustancias)} sustancias, {len(productos)} productos.")
     
     G = nx.DiGraph()
@@ -108,7 +118,7 @@ def build_graph_and_db():
         if not prod_name:
             continue
             
-        prod_id = f"Prod:{prod_name}"
+        prod_id = f"Prod:{prod['producto_ref']}"
         G.add_node(prod_id, type="Producto", **prod)
         
         # Link to Laboratorio
@@ -257,6 +267,7 @@ def build_graph_and_db():
     cur.execute('''
     CREATE TABLE productos (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        producto_ref TEXT NOT NULL UNIQUE,
         nombre_producto TEXT,
         url TEXT,
         laboratorio_nombre TEXT,
@@ -283,16 +294,16 @@ def build_graph_and_db():
     
     cur.execute('''
     CREATE TABLE producto_sustancia (
-        producto_name TEXT,
+        producto_ref TEXT NOT NULL REFERENCES productos(producto_ref),
         sustancia_name TEXT,
-        PRIMARY KEY (producto_name, sustancia_name)
+        PRIMARY KEY (producto_ref, sustancia_name)
     )''')
     
     cur.execute('''
     CREATE TABLE producto_patologia (
-        producto_name TEXT,
+        producto_ref TEXT NOT NULL REFERENCES productos(producto_ref),
         patologia_name TEXT,
-        PRIMARY KEY (producto_name, patologia_name)
+        PRIMARY KEY (producto_ref, patologia_name)
     )''')
 
     cur.execute('''
@@ -318,9 +329,9 @@ def build_graph_and_db():
         prod_name = clean_str(prod.get('nombre_producto'))
         if not prod_name:
             continue
-        cur.execute('''INSERT INTO productos (nombre_producto, url, laboratorio_nombre, descripcion, composicion, indicaciones, presentacion)
-                       VALUES (?, ?, ?, ?, ?, ?, ?)''',
-                    (prod_name, prod.get('url'), prod.get('nombre_laboratorio'), prod.get('descripcion'),
+        cur.execute('''INSERT INTO productos (producto_ref, nombre_producto, url, laboratorio_nombre, descripcion, composicion, indicaciones, presentacion)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (prod['producto_ref'], prod_name, prod.get('url'), prod.get('nombre_laboratorio'), prod.get('descripcion'),
                      prod.get('composicion'), prod.get('indicaciones'), prod.get('presentacion')))
         
         principios = split_items(prod.get('principios_activos'))
@@ -329,11 +340,11 @@ def build_graph_and_db():
             p_lower = p.lower()
             if p_lower in sustancia_names_lower:
                 target_sust = sustancia_names_lower[p_lower]
-            cur.execute('INSERT OR IGNORE INTO producto_sustancia VALUES (?, ?)', (prod_name, target_sust))
+            cur.execute('INSERT OR IGNORE INTO producto_sustancia VALUES (?, ?)', (prod['producto_ref'], target_sust))
             
         patologias = split_items(prod.get('patologias'))
         for pat in patologias:
-            cur.execute('INSERT OR IGNORE INTO producto_patologia VALUES (?, ?)', (prod_name, pat))
+            cur.execute('INSERT OR IGNORE INTO producto_patologia VALUES (?, ?)', (prod['producto_ref'], pat))
 
     # Insert Interacciones
     for u, v, kdata in G.edges(data=True):
@@ -346,7 +357,8 @@ def build_graph_and_db():
     # Add indexes for ultra-fast query execution
     cur.execute('CREATE INDEX idx_prod_name ON productos(nombre_producto)')
     cur.execute('CREATE INDEX idx_sust_name ON sustancias(nombre)')
-    cur.execute('CREATE INDEX idx_prod_sust ON producto_sustancia(producto_name)')
+    cur.execute('CREATE INDEX idx_prod_sust ON producto_sustancia(producto_ref)')
+    cur.execute('CREATE INDEX idx_sust_prod ON producto_sustancia(sustancia_name)')
     cur.execute('CREATE INDEX idx_sust_inter_orig ON sustancia_interaccion(sustancia_origen)')
     cur.execute('CREATE INDEX idx_sust_inter_dest ON sustancia_interaccion(sustancia_destino)')
 
