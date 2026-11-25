@@ -6,6 +6,9 @@ import os
 import argparse
 from pathlib import Path
 
+from src.graph.producto_ref import es_producto_ref
+from src.tools.buscador import AMBIGUO, NO_ENCONTRADO, buscar_medicamento
+
 try:
     from src.config import GRAPH_DB_PATH
     DEFAULT_DB_PATH = str(GRAPH_DB_PATH)
@@ -21,21 +24,37 @@ def get_connection(db_path=None):
         raise FileNotFoundError(f"Database not found at {target_path}. Run build_vademecum_graph.py first.")
     return sqlite3.connect(target_path)
 
-def find_product(cur, name):
-    cur.execute("SELECT nombre_producto, laboratorio_nombre, descripcion, indicaciones FROM productos WHERE LOWER(nombre_producto) = LOWER(?)", (name,))
-    row = cur.fetchone()
-    if row:
-        return {'nombre': row[0], 'laboratorio': row[1], 'descripcion': row[2], 'indicaciones': row[3]}
-        
-    # Search like
-    cur.execute("SELECT nombre_producto, laboratorio_nombre, descripcion, indicaciones FROM productos WHERE LOWER(nombre_producto) LIKE LOWER(?) LIMIT 1", (f"%{name}%",))
-    row = cur.fetchone()
-    if row:
-        return {'nombre': row[0], 'laboratorio': row[1], 'descripcion': row[2], 'indicaciones': row[3]}
-    return None
+_COLS_PRODUCTO = "producto_ref, nombre_producto, laboratorio_nombre, descripcion, indicaciones"
 
-def get_product_ingredients(cur, prod_name):
-    cur.execute("SELECT sustancia_name FROM producto_sustancia WHERE LOWER(producto_name) = LOWER(?)", (prod_name,))
+
+def _fila_a_producto(row):
+    return {'producto_ref': row[0], 'nombre': row[1], 'laboratorio': row[2],
+            'descripcion': row[3], 'indicaciones': row[4]}
+
+
+def find_product_by_ref(cur, ref):
+    """Búsqueda exacta por identificador estable (sin ambigüedad)."""
+    cur.execute(f"SELECT {_COLS_PRODUCTO} FROM productos WHERE producto_ref = ?", (ref.strip().lower(),))
+    row = cur.fetchone()
+    return _fila_a_producto(row) if row else None
+
+
+def find_product(cur, name):
+    """Búsqueda EXACTA por producto_ref (ej. 'pv-3989') o por nombre exacto.
+
+    Ya no hace coincidencia parcial: eso devolvía productos cualquiera (H-05). Para texto
+    libre usar `src.tools.buscador.buscar_medicamento`, que devuelve candidatos con puntaje.
+    """
+    if es_producto_ref(name):
+        return find_product_by_ref(cur, name)
+    cur.execute(f"SELECT {_COLS_PRODUCTO} FROM productos WHERE LOWER(nombre_producto) = LOWER(?) "
+                "ORDER BY producto_ref LIMIT 1", (name,))
+    row = cur.fetchone()
+    return _fila_a_producto(row) if row else None
+
+
+def get_product_ingredients(cur, producto_ref):
+    cur.execute("SELECT sustancia_name FROM producto_sustancia WHERE producto_ref = ?", (producto_ref,))
     rows = cur.fetchall()
     return [r[0] for r in rows]
 
@@ -68,16 +87,42 @@ def evaluate_combination(med_names, db_path=None):
     
     found_products = []
     missing_products = []
-    
+    ambiguous = []   # entradas que requieren que el usuario elija
+    avisos = []      # decisiones tomadas sin preguntar (empates con la misma composición)
+
+    ruta = db_path or DB_PATH
     for med in med_names:
-        p = find_product(cur, med)
-        if p:
-            ingredients = get_product_ingredients(cur, p['nombre'])
-            p['principios_activos'] = ingredients
-            found_products.append(p)
-        else:
+        res = buscar_medicamento(med, k=5, db_path=ruta)
+        if res.estado == NO_ENCONTRADO:
             missing_products.append(med)
-            
+            continue
+        elegido = res.candidato_para_analisis
+        if elegido is None:
+            ambiguous.append(res)
+            continue
+        if res.estado == AMBIGUO:
+            avisos.append(f"'{med}' coincide con {res.n_empatados} candidatos con la misma composición; "
+                          f"se usó {elegido.nombre}. Para especificar, usar el código (ej. {elegido.ref}).")
+        if elegido.tipo == 'producto':
+            p = find_product_by_ref(cur, elegido.ref)
+            p['tipo'] = 'producto'
+            p['principios_activos'] = get_product_ingredients(cur, p['producto_ref'])
+        else:  # sustancia ingresada directamente (ej. "ibuprofeno")
+            p = {'producto_ref': f"sust:{elegido.nombre}", 'nombre': elegido.nombre, 'laboratorio': None,
+                 'descripcion': None, 'indicaciones': None, 'tipo': 'sustancia',
+                 'principios_activos': [elegido.nombre]}
+        found_products.append(p)
+
+    if ambiguous:
+        conn.close()
+        return {
+            'status': 'ambiguous',
+            'message': "Hay medicamentos ambiguos: elegir uno de los candidatos y repetir la consulta. "
+                       "No se hizo ningún análisis parcial.",
+            'ambiguous': [r.to_dict() for r in ambiguous],
+            'missing': missing_products,
+        }
+
     if not found_products:
         conn.close()
         return {
@@ -132,6 +177,7 @@ def evaluate_combination(med_names, db_path=None):
         'status': 'success',
         'found_products': found_products,
         'missing_products': missing_products,
+        'avisos': avisos,
         'duplications': duplications,
         'interactions': detected_interactions,
         'ingredient_details': ingredient_details
@@ -140,6 +186,16 @@ def evaluate_combination(med_names, db_path=None):
 def print_report(res):
     if res['status'] == 'error':
         print(f"❌ ERROR: {res['message']}")
+        return
+    if res['status'] == 'ambiguous':
+        print(f"❓ {res['message']}\n")
+        for amb in res['ambiguous']:
+            print(f"  Para '{amb['consulta']}': {amb['mensaje']}")
+            for c in amb['candidatos']:
+                lab = f" ({c['laboratorio']})" if c['laboratorio'] else ""
+                print(f"    - {c['nombre']}{lab}  [{c['tipo']}, código {c['ref']}, coincidencia {c['motivo']}]")
+        if res['missing']:
+            print(f"  ⚠️ No encontrados: {', '.join(res['missing'])}")
         return
         
     print("\n=======================================================")
@@ -152,6 +208,8 @@ def print_report(res):
         print(f"    Principios Activos: {', '.join(p['principios_activos']) if p['principios_activos'] else 'No especificados'}")
     if res['missing_products']:
         print(f"  ⚠️ No encontrados: {', '.join(res['missing_products'])}")
+    for aviso in res.get('avisos', []):
+        print(f"  ℹ️ {aviso}")
         
     print("\n-------------------------------------------------------")
     print("1. RIESGO DE DUPLICACIÓN DE PRINCIPIOS ACTIVOS:")
@@ -184,6 +242,9 @@ def print_report(res):
     print("\n=======================================================\n")
 
 def main():
+    # En consolas de Windows (cp1252) los emojis del informe rompen la impresión.
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8')
     parser = argparse.ArgumentParser(description="Verificador de Interacciones entre Medicamentos")
     parser.add_argument('medicamentos', nargs='+', help="Lista de nombres de medicamentos a evaluar")
     parser.add_argument('--db', default=None, help="Ruta personalizada a vademecum_graph.db")

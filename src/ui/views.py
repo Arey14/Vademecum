@@ -99,6 +99,15 @@ def render_combination_view():
     if res['status'] == 'error':
         st.error(res['message'])
         return
+    if res['status'] == 'ambiguous':
+        st.warning(res['message'])
+        for amb in res['ambiguous']:
+            st.markdown(f"**{amb['consulta']}**: {amb['mensaje']}")
+            for c in amb['candidatos']:
+                st.markdown(f"- {c['nombre']} ({c['laboratorio'] or c['tipo']}) — código `{c['ref']}`")
+        return
+    for aviso in res.get('avisos', []):
+        st.info(aviso)
         
     # Build Interactive PyVis Network
     net = create_base_network(height="620px")
@@ -107,7 +116,7 @@ def render_combination_view():
     
     # 1. Add Product Nodes
     for p in res['found_products']:
-        p_id = f"Prod:{p['nombre']}"
+        p_id = f"Prod:{p['producto_ref']}"
         net.add_node(
             p_id,
             label=p['nombre'],
@@ -166,7 +175,7 @@ def render_combination_view():
         if show_pathologies:
             conn = get_connection()
             c = conn.cursor()
-            c.execute("SELECT patologia_name FROM producto_patologia WHERE producto_name = ?", (p['nombre'],))
+            c.execute("SELECT patologia_name FROM producto_patologia WHERE producto_ref = ?", (p['producto_ref'],))
             pat_rows = c.fetchall()
             conn.close()
             for pat in pat_rows:
@@ -257,7 +266,7 @@ def render_entity_explorer_view():
     details_card = {}
     
     if entity_type == "Medicamento / Producto":
-        cur.execute("SELECT nombre_producto, laboratorio_nombre, descripcion, composicion, indicaciones, presentacion FROM productos WHERE nombre_producto = ?", (selected_name,))
+        cur.execute("SELECT nombre_producto, laboratorio_nombre, descripcion, composicion, indicaciones, presentacion, producto_ref FROM productos WHERE nombre_producto = ? ORDER BY producto_ref LIMIT 1", (selected_name,))
         prod_row = cur.fetchone()
         if prod_row:
             details_card = {
@@ -269,7 +278,7 @@ def render_entity_explorer_view():
                 "Indicaciones": prod_row[4],
                 "Presentación": prod_row[5]
             }
-            p_id = f"Prod:{prod_row[0]}"
+            p_id = f"Prod:{prod_row[6]}"
             net.add_node(p_id, label=prod_row[0], title=f"<b>Medicamento:</b> {prod_row[0]}", color=COLOR_PRODUCT, shape="box", size=26)
             
             # Hop 1: Lab
@@ -279,7 +288,7 @@ def render_entity_explorer_view():
                 net.add_edge(p_id, lab_id, label="fabricado por", color=COLOR_EDGE_MANUFACTURED, dashes=True)
                 
             # Hop 1: Active Ingredients
-            cur.execute("SELECT sustancia_name FROM producto_sustancia WHERE producto_name = ?", (prod_row[0],))
+            cur.execute("SELECT sustancia_name FROM producto_sustancia WHERE producto_ref = ?", (prod_row[6],))
             sust_rows = [r[0] for r in cur.fetchall()]
             for s_name in sust_rows:
                 s_id = f"Sust:{s_name}"
@@ -312,10 +321,10 @@ def render_entity_explorer_view():
             net.add_node(s_id, label=s_row[0], title=f"<b>Principio Activo:</b> {s_row[0]}", color=COLOR_SUSTANCIA, shape="dot", size=30)
             
             # Hop 1: Products containing it
-            cur.execute("SELECT producto_name FROM producto_sustancia WHERE sustancia_name = ? LIMIT 25", (s_row[0],))
-            prods = [r[0] for r in cur.fetchall()]
-            for p_name in prods:
-                p_id = f"Prod:{p_name}"
+            cur.execute("SELECT p.producto_ref, p.nombre_producto FROM producto_sustancia ps JOIN productos p ON p.producto_ref = ps.producto_ref WHERE ps.sustancia_name = ? LIMIT 25", (s_row[0],))
+            prods = cur.fetchall()
+            for p_ref, p_name in prods:
+                p_id = f"Prod:{p_ref}"
                 net.add_node(p_id, label=p_name, title=f"<b>Medicamento:</b> {p_name}", color=COLOR_PRODUCT, shape="box", size=16)
                 net.add_edge(p_id, s_id, label="contiene", color=COLOR_EDGE_CONTAINS)
                 
@@ -342,16 +351,16 @@ def render_entity_explorer_view():
             net.add_node(l_id, label=lab_row[0], title=f"<b>Laboratorio:</b> {lab_row[0]}", color=COLOR_LAB, shape="diamond", size=32)
             
             # Hop 1: Manufactured products
-            cur.execute("SELECT nombre_producto FROM productos WHERE laboratorio_nombre = ? LIMIT 35", (lab_row[0],))
-            prods = [r[0] for r in cur.fetchall()]
-            for p_name in prods:
-                p_id = f"Prod:{p_name}"
+            cur.execute("SELECT producto_ref, nombre_producto FROM productos WHERE laboratorio_nombre = ? LIMIT 35", (lab_row[0],))
+            prods = cur.fetchall()
+            for p_ref, p_name in prods:
+                p_id = f"Prod:{p_ref}"
                 net.add_node(p_id, label=p_name, title=f"<b>Medicamento:</b> {p_name}", color=COLOR_PRODUCT, shape="box", size=16)
                 net.add_edge(p_id, l_id, label="fabricado por", color=COLOR_EDGE_MANUFACTURED)
                 
                 # Hop 2: Active ingredients of products
                 if hops >= 2:
-                    cur.execute("SELECT sustancia_name FROM producto_sustancia WHERE producto_name = ?", (p_name,))
+                    cur.execute("SELECT sustancia_name FROM producto_sustancia WHERE producto_ref = ?", (p_ref,))
                     for s_row in cur.fetchall():
                         s_name = s_row[0]
                         s_id = f"Sust:{s_name}"

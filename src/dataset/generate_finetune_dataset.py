@@ -39,8 +39,8 @@ def generate_dataset(output_path=OUTPUT_JSONL):
     cur.execute('''
     SELECT p.nombre_producto, p.laboratorio_nombre, p.descripcion, GROUP_CONCAT(ps.sustancia_name, '; ')
     FROM productos p
-    JOIN producto_sustancia ps ON p.nombre_producto = ps.producto_name
-    GROUP BY p.nombre_producto
+    JOIN producto_sustancia ps ON p.producto_ref = ps.producto_ref
+    GROUP BY p.producto_ref
     HAVING COUNT(ps.sustancia_name) >= 1
     ''')
     products_with_ingredients = cur.fetchall()

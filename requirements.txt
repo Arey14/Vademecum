@@ -5,3 +5,12 @@ aiohttp>=3.9.0
 playwright>=1.40.0
 streamlit>=1.30.0
 pyvis>=0.3.2
+
+# Módulo de tratamiento (versiones fijadas)
+sqlmodel==0.0.48
+pydantic==2.14.3
+tzdata==2026.6
+rapidfuzz==3.14.6
+
+# Desarrollo
+pytest==9.2.0
